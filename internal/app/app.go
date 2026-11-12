@@ -156,8 +156,9 @@ type app struct {
 
 	scrub      float64
 	scrubbing  bool
-	volume     float64
-	volumeOpen bool // the volume popover of the player bar shows
+	volume      float64
+	localVolume float64
+	volumeOpen  bool // the volume popover of the player bar shows
 	mutedFrom  float64
 
 	rowBars barState
@@ -249,7 +250,30 @@ func (a *app) showMain() {
 // appName is the name the app shows.
 const appName = "MySpotify"
 
+func (a *app) isRemote() bool {
+	if a.connect != nil && a.connect.cluster.Active != "" && a.connect.cluster.Active != a.connect.client.ID {
+		return true
+	}
+	return a.pl != nil && a.pl.IsRemote()
+}
+
+func (a *app) restoreLocalVolume() {
+	if a.localVolume > 0 {
+		a.volume = a.localVolume
+	} else if a.settings.Volume > 0 {
+		a.volume = a.settings.Volume
+		a.localVolume = a.volume
+	}
+	if a.connect != nil {
+		a.connect.volLocal = time.Time{}
+	}
+	if a.pl != nil && !a.isRemote() {
+		a.here(func() { a.pl.SetVolume(a.volume) })
+	}
+}
+
 func Run() error {
+	spotify.StartCastDiscovery()
 	a := &app{
 		playlists:  map[string]*spotify.Playlist{},
 		loadingPl:  map[string]bool{},
@@ -330,6 +354,7 @@ func Run() error {
 		a.applyHotkeys()
 		a.played, a.playedFrom = loadPlayed()
 		a.volume = a.settings.Volume
+		a.localVolume = a.volume
 		a.pl.SetVolume(a.volume)
 		a.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:         appName,
@@ -415,7 +440,11 @@ func Run() error {
 		if a.mineTimer != nil {
 			a.mineTimer.Stop()
 		}
-		a.settings.Volume = a.volume
+		if !a.isRemote() {
+			a.settings.Volume = a.volume
+		} else if a.localVolume > 0 {
+			a.settings.Volume = a.localVolume
+		}
 		a.settings.save()
 		a.saveSession()
 		if a.pl != nil {

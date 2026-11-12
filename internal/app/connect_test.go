@@ -354,5 +354,37 @@ func TestConnectQueueWhileReconnectingSaysSo(t *testing.T) {
 	}
 	if len(a.connect.jobs) != 0 || len(a.pl.Queue()) != 1 {
 		t.Fatal("queued while Connect reconnects")
+
+	}
+}
+
+// Discovered Cast speakers keep a stable order across frames and when joining the Connect cluster.
+func TestConnectCastDevicesMenuOrderAndTransfer(t *testing.T) {
+	spotify.ResetCastSpeakersForTest([]*spotify.CastSpeaker{
+		{ID: "id-grey", Name: "灰", Model: "Google Home Mini", IP: "192.168.1.107", Port: 8009, ExpiresAt: time.Now().Add(time.Minute)},
+		{ID: "id-group", Name: "音響", Model: "Google Cast Group", IP: "192.168.1.107", Port: 32072, ExpiresAt: time.Now().Add(time.Minute)},
+		{ID: "id-black", Name: "黑", Model: "Google Nest Mini", IP: "192.168.1.106", Port: 8009, ExpiresAt: time.Now().Add(time.Minute)},
+	})
+	defer spotify.ResetCastSpeakersForTest(nil)
+
+	a := testConnectApp(t)
+	tt := ui.NewTester(a.view, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("播放设备"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 15; i++ {
+		tt.Frame()
+		got := spotify.GetDiscoveredCastSpeakers()
+		if len(got) != 3 || got[0].Name != "灰" || got[1].Name != "音響" || got[2].Name != "黑" {
+			t.Fatalf("frame %d: unexpected speaker order: %+v", i, got)
+		}
+	}
+	if err := tt.Click("音響 · Google Cast Group"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.connect.jobs) != 1 || a.connect.open {
+		t.Fatal("clicking Cast speaker did not queue wakeAndTransferCast job and close menu")
 	}
 }

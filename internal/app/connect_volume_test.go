@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -69,6 +70,35 @@ func TestConnectVolumeHereIgnoresItsEcho(t *testing.T) {
 
 // Playing here, clicking a line of the lyrics jumps there at once: it went
 // to Spotify's servers and waited for them to say so.
+// When switching between local computer and a remote device, the volume
+// slider reflects the target device's volume rather than retaining the
+// previous device's volume.
+func TestConnectDeviceSwitchVolumeSync(t *testing.T) {
+	a := connectTestApp()
+	a.volume = 1.0
+	a.pl.SetVolume(1.0)
+
+	// Switch to a remote speaker that has volume at 50% (32768/65535).
+	speakerCluster := `{"cluster":{"active_device_id":"speaker","server_timestamp_ms":"2000","devices":{"local":{"name":"Vinyl","volume":"65535"},"speaker":{"name":"Speaker","volume":"32768"}},"player_state":{"track":{"uri":"spotify:track:abc","metadata":{"title":"Song","artist_name":"Artist"}}}}}`
+	a.connectEvent(spotify.ConnectEvent{Kind: "cluster", Data: json.RawMessage(speakerCluster)})
+
+	if math.Abs(a.volume-0.5) > 0.01 {
+		t.Errorf("switching to speaker: expected volume ~0.5, got %v", a.volume)
+	}
+
+	// While connected to speaker, turn volume to 70%.
+	a.volume = 0.7
+	a.pl.SetVolume(0.7)
+
+	// Switch back to local computer which had volume at 100%.
+	localCluster := `{"cluster":{"active_device_id":"local","server_timestamp_ms":"3000","devices":{"local":{"name":"Vinyl","volume":"65535"},"speaker":{"name":"Speaker","volume":"45874"}},"player_state":{"track":{"uri":"spotify:track:abc","metadata":{"title":"Song","artist_name":"Artist"}}}}}`
+	a.connectEvent(spotify.ConnectEvent{Kind: "cluster", Data: json.RawMessage(localCluster)})
+
+	if math.Abs(a.volume-1.0) > 0.01 {
+		t.Errorf("switching back to local: expected volume 1.0, got %v", a.volume)
+	}
+}
+
 func TestConnectSeekHereIsAtOnce(t *testing.T) {
 	a := connectTestApp()
 	a.pl.Cue([]spotify.Track{{ID: "1", Name: "x", Duration: 200000}})
@@ -78,5 +108,34 @@ func TestConnectSeekHereIsAtOnce(t *testing.T) {
 	}
 	if len(a.connect.jobs) != 0 {
 		t.Fatal("asked Spotify to seek")
+	}
+}
+
+// When switching back to local, replace_state may arrive before the cluster
+// event. The volume must still restore to the local computer's volume.
+func TestConnectSwitchBackWithReplaceState(t *testing.T) {
+	a := connectTestApp()
+	a.volume = 1.0
+	a.localVolume = 1.0
+	a.pl.SetVolume(1.0)
+
+	// Switch to a remote speaker that has volume at 50%.
+	speakerCluster := `{"cluster":{"active_device_id":"speaker","server_timestamp_ms":"2000","devices":{"local":{"name":"Vinyl","volume":"65535"},"speaker":{"name":"Speaker","volume":"32768"}},"player_state":{"track":{"uri":"spotify:track:abc","metadata":{"title":"Song","artist_name":"Artist"}}}}}`
+	a.connectEvent(spotify.ConnectEvent{Kind: "cluster", Data: json.RawMessage(speakerCluster)})
+
+	if math.Abs(a.volume-0.5) > 0.01 {
+		t.Fatalf("switching to speaker: expected volume ~0.5, got %v", a.volume)
+	}
+
+	// Spotify sends replace_state command to start playing locally.
+	replaceCmd := `{"type":"replace_state","state_ref":{"state_index":0,"paused":false},"state_machine":{"state_machine_id":"m1","tracks":[{"metadata":{"uri":"spotify:track:abc","name":"Song","duration":200000,"authors":[{"name":"Artist"}]}}],"states":[{"state_id":"s1","track":0,"transitions":{}}]}}`
+	a.connectEvent(spotify.ConnectEvent{Kind: "command", Data: json.RawMessage(replaceCmd)})
+
+	// Then cluster event arrives.
+	localCluster := `{"cluster":{"active_device_id":"local","server_timestamp_ms":"3000","devices":{"local":{"name":"Vinyl","volume":"65535"},"speaker":{"name":"Speaker","volume":"32768"}},"player_state":{"track":{"uri":"spotify:track:abc","metadata":{"title":"Song","artist_name":"Artist"}}}}}`
+	a.connectEvent(spotify.ConnectEvent{Kind: "cluster", Data: json.RawMessage(localCluster)})
+
+	if math.Abs(a.volume-1.0) > 0.01 {
+		t.Fatalf("switching back to local with replace_state: expected volume 1.0, got %v", a.volume)
 	}
 }

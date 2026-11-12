@@ -221,6 +221,10 @@ func (a *app) nativeVolumeSlider(c *ui.Context, pop popover) {
 	s := ui.SliderBase(c.Key("volume"), &a.volume, 0, 1).Vertical().Size(knob+8, 124).PaddingY(knob / 2).
 		Step(0.01).AutoFocus().FocusRing(false).Label(l10n.T("音量"))
 	if s.Changed() {
+		if !a.isRemote() {
+			a.localVolume = a.volume
+			a.settings.Volume = a.volume
+		}
 		a.pl.SetVolume(a.volume)
 	}
 	s.HandleInput(func(ev ui.InputEvent) bool { return a.scrollVolume(ev) })
@@ -251,6 +255,10 @@ func (a *app) scrollVolume(ev ui.InputEvent) bool {
 		return false
 	}
 	a.volume = min(1, max(0, a.volume-float64(ev.DY)/400))
+	if !a.isRemote() {
+		a.localVolume = a.volume
+		a.settings.Volume = a.volume
+	}
 	a.pl.SetVolume(a.volume)
 	return true
 }
@@ -289,6 +297,10 @@ func (a *app) volumeSlider(c *ui.Context, color, track ui.Color, width float32) 
 		a.muteButton(c, color)
 		s := ui.SliderBase(c.Key("volume"), &a.volume, 0, 1).Width(width).Height(16).FocusRing(false).Label(l10n.T("音量"))
 		if s.Changed() {
+			if !a.isRemote() {
+				a.localVolume = a.volume
+				a.settings.Volume = a.volume
+			}
 			a.pl.SetVolume(a.volume)
 		}
 		hot := s.Hovered() || s.Pressed()
